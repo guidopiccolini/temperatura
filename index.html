@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historial de temperatura · Cámara</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Temperatura">
+<meta name="theme-color" content="#0f0f0f">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" href="icon.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f0f0f; --panel:#181818; --panel2:#202020; --line:#2c2c2c;
+    --text:#eaeaea; --muted:#8a8a8a; --blue:#1e88e5; --green:#43a047; --red:#e53935; --yellow:#fbc02d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:16px;padding-bottom:40px}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .row + .row{margin-top:10px}
+  label{color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:3px}
+  input,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 8px;font:inherit;min-width:0}
+  input[type=number]{width:80px}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:#555}
+  button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  button.primary{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+  button:disabled{opacity:.5;cursor:default}
+  details summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .status{font-size:12px;color:var(--muted);margin-left:auto}
+  .status.err{color:var(--red)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .card .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .card .v{font-size:22px;font-weight:700;margin-top:2px}
+  .card .d{color:var(--muted);font-size:11px;margin-top:2px}
+  .chartbox{position:relative;height:340px}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:12px;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--panel)}
+  th .arr{opacity:.8}
+  td.num{text-align:right} th.num{text-align:right}
+  .tablewrap{max-height:520px;overflow:auto}
+  .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:8px;color:var(--muted);font-size:12px}
+  .hi{color:var(--red)} .lo{color:var(--blue)} .ok{color:var(--green)}
+  .gaps li{margin:2px 0}
+  .muted{color:var(--muted)}
+  textarea{width:100%;height:120px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;font:12px monospace}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+
+<h1>🌡 Historial de temperatura</h1>
+<div class="sub">Datos de ThingSpeak · horarios en hora local</div>
+
+<!-- CONFIGURACIÓN -->
+<div class="panel">
+  <details id="cfgBox">
+    <summary>⚙️ Configuración del canal y rango aceptable</summary>
+    <div class="row" style="margin-top:10px">
+      <label>Canal<input id="cfgChannel" value="" style="width:110px"></label>
+      <label>Read API key<input id="cfgKey" value="" style="width:190px"></label>
+      <label>Field<input id="cfgField" type="number" value="1" min="1" max="8" style="width:60px"></label>
+      <label>Mín. OK (°C)<input id="cfgMin" type="number" step="0.1" value="2"></label>
+      <label>Máx. OK (°C)<input id="cfgMax" type="number" step="0.1" value="4"></label>
+      <label>Corte si no hay datos por (min)<input id="cfgGap" type="number" value="5" min="1"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px;margin-top:14px">
+        <input id="cfgBad" type="checkbox" checked> Descartar lecturas erróneas (−127 / 85)
+      </label>
+    </div>
+  </details>
+</div>
+
+<!-- RANGO -->
+<div class="panel">
+  <div class="row" id="presets">
+    <button data-p="6h">6 h</button>
+    <button data-p="hoy">Hoy</button>
+    <button data-p="ayer">Ayer</button>
+    <button data-p="24h" class="on">24 h</button>
+    <button data-p="7d">7 días</button>
+    <button data-p="30d">30 días</button>
+    <button data-p="mes">Este mes</button>
+  </div>
+  <div class="row">
+    <label>Desde<input id="from" type="datetime-local"></label>
+    <label>Hasta<input id="to" type="datetime-local"></label>
+    <label>Agrupar
+      <select id="agg">
+        <option value="auto">Automático</option>
+        <option value="0">Sin agrupar (cada lectura)</option>
+        <option value="5">5 minutos</option>
+        <option value="15">15 minutos</option>
+        <option value="60">1 hora</option>
+        <option value="360">6 horas</option>
+        <option value="1440">1 día</option>
+      </select>
+    </label>
+    <button class="primary" id="go" style="margin-top:14px">Consultar</button>
+    <span class="status" id="status"></span>
+  </div>
+</div>
+
+<!-- RESUMEN -->
+<div class="cards" id="cards"></div>
+
+<!-- GRÁFICO -->
+<div class="panel"><div class="chartbox"><canvas id="chart"></canvas></div></div>
+
+<!-- CORTES -->
+<div class="panel hidden" id="gapsPanel">
+  <details>
+    <summary id="gapsTitle">Cortes de datos</summary>
+    <ul class="gaps" id="gapsList"></ul>
+  </details>
+</div>
+
+<!-- TABLA -->
+<div class="panel">
+  <div class="row" style="margin-bottom:8px">
+    <strong id="tableTitle">Lecturas</strong>
+    <label style="flex-direction:row;align-items:center;gap:6px;margin-left:12px">Mostrar
+      <select id="filter">
+        <option value="all">Todas</option>
+        <option value="out">Fuera de rango</option>
+        <option value="hi">Por encima del máximo</option>
+        <option value="lo">Por debajo del mínimo</option>
+      </select>
+    </label>
+    <span style="margin-left:auto" class="row">
+      <button id="csvDl">⬇️ Descargar CSV</button>
+      <button id="csvCopy">📋 Copiar CSV</button>
+    </span>
+  </div>
+  <div class="tablewrap"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+  <div class="pager">
+    <span id="pageInfo"></span>
+    <button id="prev">‹</button><button id="next">›</button>
+  </div>
+  <textarea id="csvBox" class="hidden" readonly></textarea>
+</div>
+
+<script>
+// ─── UTILIDADES ───────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const MAX_RESULTS = 8000;          // límite de ThingSpeak por consulta
+const CHUNK_MS = 36 * 3600 * 1000; // ventanas de 36 h (≈6500 lecturas a 20 s)
+
+function toLocalInput(d){
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function tsUTC(ms){ // formato que pide ThingSpeak, en UTC
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+const fmtFull = new Intl.DateTimeFormat("es-AR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
+const fmtShort = new Intl.DateTimeFormat("es-AR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
+const fmtHour = new Intl.DateTimeFormat("es-AR",{hour:"2-digit",minute:"2-digit",hour12:false});
+const fmtDay = new Intl.DateTimeFormat("es-AR",{day:"2-digit",month:"2-digit"});
+const t = v => v == null || isNaN(v) ? "—" : v.toFixed(2) + " °C";
+function dur(ms){
+  const m = Math.round(ms/60000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m/60), r = m%60;
+  if (h < 24) return `${h} h ${r} min`;
+  return `${Math.floor(h/24)} d ${h%24} h`;
+}
+function setStatus(msg, err){ const s=$("status"); s.textContent=msg; s.className="status"+(err?" err":""); }
+
+// ─── CONFIG GUARDADA (si el navegador lo permite) ─────────
+const CFG_IDS = ["cfgChannel","cfgKey","cfgField","cfgMin","cfgMax","cfgGap","agg"];
+try{
+  const saved = JSON.parse(localStorage.getItem("histTempCfg")||"{}");
+  CFG_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; });
+  if (saved.cfgBad != null) $("cfgBad").checked = saved.cfgBad;
+}catch(_){}
+// Canal y key desde el link compartido: …/#c=CANAL&k=KEY(&f=FIELD)
+(function(){
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (h.get("c")) $("cfgChannel").value = h.get("c");
+  if (h.get("k")) $("cfgKey").value = h.get("k");
+  if (h.get("f")) $("cfgField").value = h.get("f");
+})();
+function saveCfg(){
+  try{
+    const o = {}; CFG_IDS.forEach(id => o[id] = $(id).value); o.cfgBad = $("cfgBad").checked;
+    localStorage.setItem("histTempCfg", JSON.stringify(o));
+  }catch(_){}
+}
+const cfg = () => ({
+  channel: $("cfgChannel").value.trim(), key: $("cfgKey").value.trim(), field: parseInt($("cfgField").value)||1,
+  min: parseFloat($("cfgMin").value), max: parseFloat($("cfgMax").value),
+  gapMs: (parseFloat($("cfgGap").value)||5)*60000, dropBad: $("cfgBad").checked
+});
+
+// ─── PRESETS DE RANGO ─────────────────────────────────────
+function applyPreset(p){
+  const now = new Date(); let from, to = now;
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch(p){
+    case "6h":  from = new Date(now - 6*3600e3); break;
+    case "hoy": from = midnight; break;
+    case "ayer": from = new Date(midnight - 864e5); to = midnight; break;
+    case "24h": from = new Date(now - 864e5); break;
+    case "7d":  from = new Date(now - 7*864e5); break;
+    case "30d": from = new Date(now - 30*864e5); break;
+    case "mes": from = new Date(now.getFullYear(), now.getMonth(), 1); break;
+  }
+  $("from").value = toLocalInput(from); $("to").value = toLocalInput(to);
+  document.querySelectorAll("#presets button").forEach(b => b.classList.toggle("on", b.dataset.p === p));
+}
+document.querySelectorAll("#presets button").forEach(b => b.onclick = () => { applyPreset(b.dataset.p); load(); });
+["from","to"].forEach(id => $(id).addEventListener("input", () =>
+  document.querySelectorAll("#presets button").forEach(b => b.classList.remove("on"))));
+
+// ─── DESCARGA DE THINGSPEAK ───────────────────────────────
+async function fetchWindow(c, s, e){
+  const url = `https://api.thingspeak.com/channels/${encodeURIComponent(c.channel)}/fields/${c.field}.json`
+    + `?api_key=${encodeURIComponent(c.key)}&timezone=UTC&results=${MAX_RESULTS}`
+    + `&start=${encodeURIComponent(tsUTC(s))}&end=${encodeURIComponent(tsUTC(e))}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`ThingSpeak respondió ${r.status}`);
+  const j = await r.json();
+  if (j === -1 || !j.feeds) throw new Error("Canal o API key inválidos");
+  // Si llegó al tope, partimos la ventana en dos para no perder datos
+  if (j.feeds.length >= MAX_RESULTS && e - s > 120000){
+    const mid = s + Math.floor((e - s)/2);
+    const [a, b] = await Promise.all([fetchWindow(c, s, mid), fetchWindow(c, mid + 1000, e)]);
+    return a.concat(b);
+  }
+  return j.feeds;
+}
+
+async function fetchAll(c, s, e){
+  const wins = [];
+  for (let a = s; a < e; a += CHUNK_MS) wins.push([a, Math.min(e, a + CHUNK_MS - 1000)]);
+  const out = []; let done = 0, i = 0;
+  async function worker(){
+    while (i < wins.length){
+      const [a, b] = wins[i++];
+      out.push(...await fetchWindow(c, a, b));
+      done++; setStatus(`Descargando… ${done}/${wins.length}`);
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(4, wins.length)}, worker));
+  return out;
+}
+
+// ─── ESTADO ───────────────────────────────────────────────
+let raw = [];        // [{x: ms, y: temp}]
+let rows = [];       // filas que muestra la tabla
+let aggMin = 0;      // minutos del agrupado actual (0 = sin agrupar)
+let sortKey = "x", sortDir = -1, page = 0;
+const PAGE = 100;
+let chart;
+
+// ─── CONSULTA PRINCIPAL ───────────────────────────────────
+async function load(){
+  const c = cfg();
+  if (!c.channel || !c.key){
+    $("cfgBox").open = true;
+    setStatus("Falta el canal o la key: abrí el link completo que te compartieron", true);
+    return;
+  }
+  saveCfg();
+  const s = new Date($("from").value).getTime(), e = new Date($("to").value).getTime();
+  if (isNaN(s) || isNaN(e) || s >= e){ setStatus("Revisá el rango de fechas", true); return; }
+  $("go").disabled = true; setStatus("Descargando…");
+  try{
+    const feeds = await fetchAll(c, s, e);
+    const seen = new Set(); let bad = 0;
+    raw = [];
+    for (const f of feeds){
+      if (seen.has(f.entry_id)) continue; seen.add(f.entry_id);
+      const y = parseFloat(f[`field${c.field}`]);
+      if (isNaN(y)) continue;
+      if (c.dropBad && (y <= -127 || y === 85)){ bad++; continue; }
+      raw.push({x: Date.parse(f.created_at), y});
+    }
+    raw.sort((a,b) => a.x - b.x);
+    render(c, s, e, bad);
+    setStatus(raw.length ? `${raw.length.toLocaleString("es-AR")} lecturas` : "No hay datos en ese rango");
+  }catch(err){
+    console.error(err);
+    setStatus("Error: " + (err.message || err) + (location.protocol === "file:" ? " (si persiste, probá desde Scriptable)" : ""), true);
+  }finally{ $("go").disabled = false; }
+}
+
+// ─── AGRUPADO ─────────────────────────────────────────────
+function chooseAgg(span){
+  const sel = $("agg").value;
+  if (sel !== "auto") return parseInt(sel);
+  if (raw.length <= 2500) return 0;
+  const opts = [5, 15, 30, 60, 180, 360, 1440];
+  return opts.find(m => span / (m*60000) <= 1200) || 1440;
+}
+function aggregate(min){
+  const size = min*60000, map = new Map();
+  for (const p of raw){
+    // alinear a medianoche local para buckets de un día
+    const off = new Date(p.x).getTimezoneOffset()*60000;
+    const k = Math.floor((p.x - off)/size)*size + off;
+    let b = map.get(k);
+    if (!b){ b = {x:k, sum:0, n:0, min:Infinity, max:-Infinity}; map.set(k, b); }
+    b.sum += p.y; b.n++; if (p.y < b.min) b.min = p.y; if (p.y > b.max) b.max = p.y;
+  }
+  return [...map.values()].sort((a,b) => a.x - b.x).map(b => ({x:b.x, y:b.sum/b.n, min:b.min, max:b.max, n:b.n}));
+}
+
+// ─── CORTES DE DATOS ──────────────────────────────────────
+function findGaps(gapMs){
+  const g = [];
+  for (let i = 1; i < raw.length; i++){
+    const d = raw[i].x - raw[i-1].x;
+    if (d > gapMs) g.push({from: raw[i-1].x, to: raw[i].x, d});
+  }
+  return g;
+}
+
+// ─── RENDER ───────────────────────────────────────────────
+function render(c, s, e, bad){
+  const span = e - s;
+  aggMin = chooseAgg(span);
+  const gaps = findGaps(c.gapMs);
+
+  // Estadísticas (siempre sobre lecturas crudas)
+  let mn = null, mx = null, sum = 0, inR = 0, hi = 0, lo = 0;
+  for (const p of raw){
+    if (!mn || p.y < mn.y) mn = p;
+    if (!mx || p.y > mx.y) mx = p;
+    sum += p.y;
+    if (p.y > c.max) hi++; else if (p.y < c.min) lo++; else inR++;
+  }
+  const n = raw.length, last = raw[n-1];
+  const pct = v => n ? (v/n*100).toFixed(1) + "%" : "—";
+  const gapTotal = gaps.reduce((a,g) => a + g.d, 0);
+  const longest = gaps.reduce((a,g) => g.d > (a?.d||0) ? g : a, null);
+  const colorOf = v => v == null ? "" : v > c.max ? "hi" : v < c.min ? "lo" : "ok";
+
+  $("cards").innerHTML = [
+    ["Última lectura", t(last?.y), last ? fmtFull.format(last.x) : "", colorOf(last?.y)],
+    ["Mínima", t(mn?.y), mn ? fmtFull.format(mn.x) : "", colorOf(mn?.y)],
+    ["Máxima", t(mx?.y), mx ? fmtFull.format(mx.x) : "", colorOf(mx?.y)],
+    ["Promedio", t(n ? sum/n : null), `${n.toLocaleString("es-AR")} lecturas`, colorOf(n ? sum/n : null)],
+    ["En rango", pct(inR), `${c.min}–${c.max} °C`, "ok"],
+    ["Fuera de rango", pct(hi + lo), `▲ ${pct(hi)} · ▼ ${pct(lo)}`, (hi+lo) ? "hi" : ""],
+    ["Cortes de datos", String(gaps.length), gaps.length ? `Total ${dur(gapTotal)} · mayor ${dur(longest.d)}` : "Sin cortes", gaps.length ? "hi" : "ok"],
+    ...(bad ? [["Descartadas", String(bad), "Lecturas −127 / 85", "hi"]] : [])
+  ].map(([k,v,d,cl]) => `<div class="card"><div class="k">${k}</div><div class="v ${cl}">${v}</div><div class="d">${d}</div></div>`).join("");
+
+  // Lista de cortes
+  $("gapsPanel").classList.toggle("hidden", !gaps.length);
+  $("gapsTitle").textContent = `Cortes de datos (${gaps.length}) — ver detalle`;
+  $("gapsList").innerHTML = gaps.slice().sort((a,b) => b.d - a.d).slice(0, 200)
+    .map(g => `<li>${fmtFull.format(g.from)} → ${fmtFull.format(g.to)} <span class="muted">(${dur(g.d)})</span></li>`).join("");
+
+  // Datos para tabla y gráfico
+  const series = aggMin ? aggregate(aggMin) : raw.map(p => ({x:p.x, y:p.y}));
+  rows = series;
+  drawChart(c, series, s, e, span);
+  page = 0; renderTable();
+}
+
+function withBreaks(pts, key, gapMs){
+  const out = [];
+  for (let i = 0; i < pts.length; i++){
+    if (i && pts[i].x - pts[i-1].x > gapMs) out.push({x: pts[i-1].x + 1, y: null});
+    out.push({x: pts[i].x, y: pts[i][key]});
+  }
+  return out;
+}
+
+function drawChart(c, series, s, e, span){
+  const gapMs = aggMin ? Math.max(aggMin*60000*1.5, c.gapMs) : c.gapMs;
+  const lineColor = ctx => {
+    const v = ctx.p1?.parsed?.y;
+    return v == null ? "#888" : v > c.max ? "#e53935" : v < c.min ? "#1e88e5" : "#43a047";
+  };
+  const datasets = [{
+    label: aggMin ? "Promedio" : "Temperatura",
+    data: withBreaks(series, "y", gapMs),
+    borderWidth: 1.8, pointRadius: 0, pointHitRadius: 6, tension: 0.15, spanGaps: false,
+    segment: {borderColor: lineColor}, borderColor: "#43a047"
+  }];
+  if (aggMin){
+    datasets.push(
+      {label:"Máx", data: withBreaks(series, "max", gapMs), borderWidth:0, pointRadius:0, fill:"+1",
+       backgroundColor:"rgba(255,255,255,0.08)", spanGaps:false},
+      {label:"Mín", data: withBreaks(series, "min", gapMs), borderWidth:0, pointRadius:0, fill:false, spanGaps:false}
+    );
+  }
+  const band = v => ({label:"", data:[{x:s,y:v},{x:e,y:v}], borderColor:"rgba(255,255,255,0.25)", borderDash:[5,5], borderWidth:1, pointRadius:0});
+  datasets.push(band(c.min), band(c.max));
+
+  const tick = v => span <= 36*3600e3 ? fmtHour.format(v) : span <= 10*864e5 ? fmtShort.format(v) : fmtDay.format(v);
+  if (chart) chart.destroy();
+  chart = new Chart($("chart"), {
+    type: "line",
+    data: {datasets},
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: true,
+      interaction: {mode: "nearest", axis: "x", intersect: false},
+      scales: {
+        x: {type: "linear", min: s, max: e, ticks: {color:"#8a8a8a", maxTicksLimit: 8, callback: tick}, grid: {color:"#262626"}},
+        y: {ticks: {color:"#8a8a8a", callback: v => v + "°"}, grid: {color:"#262626"}}
+      },
+      plugins: {
+        legend: {display: false},
+        tooltip: {
+          filter: it => it.datasetIndex === 0,
+          callbacks: {
+            title: items => items.length ? fmtFull.format(items[0].parsed.x) : "",
+            label: it => {
+              const p = rows.find(r => r.x === it.parsed.x);
+              return aggMin && p ? [`Prom ${t(p.y)}`, `Mín ${t(p.min)} · Máx ${t(p.max)}`] : t(it.parsed.y);
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// ─── TABLA ────────────────────────────────────────────────
+function filtered(){
+  const c = cfg(), f = $("filter").value, val = r => aggMin ? (f === "lo" ? r.min : f === "hi" ? r.max : r.y) : r.y;
+  let list = rows;
+  if (f === "hi") list = rows.filter(r => (aggMin ? r.max : r.y) > c.max);
+  else if (f === "lo") list = rows.filter(r => (aggMin ? r.min : r.y) < c.min);
+  else if (f === "out") list = rows.filter(r => aggMin ? (r.max > c.max || r.min < c.min) : (r.y > c.max || r.y < c.min));
+  return list.slice().sort((a,b) => (a[sortKey] - b[sortKey]) * sortDir);
+}
+function renderTable(){
+  const c = cfg();
+  const cols = aggMin
+    ? [["x","Desde"],["y","Promedio",1],["min","Mín",1],["max","Máx",1],["n","Lecturas",1]]
+    : [["x","Fecha y hora"],["y","Temperatura",1]];
+  if (!cols.some(cl => cl[0] === sortKey)){ sortKey = "x"; sortDir = -1; }
+  $("tableTitle").textContent = aggMin ? `Agrupado cada ${aggMin >= 60 ? (aggMin/60) + " h" : aggMin + " min"}` : "Lecturas";
+  $("thead").innerHTML = "<tr>" + cols.map(([k,l,num]) =>
+    `<th data-k="${k}" class="${num?"num":""}">${l} <span class="arr">${sortKey===k ? (sortDir>0?"▲":"▼") : ""}</span></th>`).join("") + "</tr>";
+  document.querySelectorAll("#thead th").forEach(th => th.onclick = () => {
+    const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : (k === "x" ? -1 : 1); sortKey = k; page = 0; renderTable();
+  });
+  const list = filtered(), pages = Math.max(1, Math.ceil(list.length / PAGE));
+  page = Math.min(page, pages - 1);
+  const cl = v => v > c.max ? "hi" : v < c.min ? "lo" : "";
+  const fmtX = x => aggMin >= 1440 ? fmtDay.format(x) + "/" + new Date(x).getFullYear() : fmtFull.format(x);
+  $("tbody").innerHTML = list.slice(page*PAGE, page*PAGE + PAGE).map(r => aggMin
+    ? `<tr><td>${fmtX(r.x)}</td><td class="num ${cl(r.y)}">${t(r.y)}</td><td class="num ${cl(r.min)}">${t(r.min)}</td><td class="num ${cl(r.max)}">${t(r.max)}</td><td class="num muted">${r.n}</td></tr>`
+    : `<tr><td>${fmtFull.format(r.x)}</td><td class="num ${cl(r.y)}">${t(r.y)}</td></tr>`
+  ).join("") || `<tr><td colspan="5" class="muted">Sin filas</td></tr>`;
+  $("pageInfo").textContent = list.length ? `${page*PAGE+1}–${Math.min(list.length,(page+1)*PAGE)} de ${list.length.toLocaleString("es-AR")}` : "";
+  $("prev").disabled = page === 0; $("next").disabled = page >= pages - 1;
+}
+$("prev").onclick = () => { page--; renderTable(); };
+$("next").onclick = () => { page++; renderTable(); };
+$("filter").onchange = () => { page = 0; renderTable(); };
+$("agg").onchange = () => { if (raw.length){ const s=new Date($("from").value).getTime(), e=new Date($("to").value).getTime(); saveCfg(); render(cfg(), s, e, 0); } };
+
+// ─── CSV ──────────────────────────────────────────────────
+function csv(){
+  const list = filtered(), sep = ";";  // ; para que Excel en español lo abra bien
+  const num = v => v.toFixed(2).replace(".", ",");
+  const iso = x => { const d = new Date(x); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  const head = aggMin ? ["fecha","promedio","min","max","lecturas"] : ["fecha","temperatura"];
+  return [head.join(sep), ...list.map(r => aggMin
+    ? [iso(r.x), num(r.y), num(r.min), num(r.max), r.n].join(sep)
+    : [iso(r.x), num(r.y)].join(sep))].join("\n");
+}
+$("csvDl").onclick = () => {
+  if (!rows.length) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + csv()], {type:"text/csv"}));
+  a.download = `temperatura_${$("from").value.slice(0,10)}_${$("to").value.slice(0,10)}.csv`;
+  a.click();
+};
+$("csvCopy").onclick = async () => {
+  if (!rows.length) return;
+  const text = csv();
+  try{ await navigator.clipboard.writeText(text); setStatus("CSV copiado al portapapeles"); }
+  catch(_){ const b = $("csvBox"); b.value = text; b.classList.remove("hidden"); b.select(); setStatus("Seleccioná y copiá el texto de abajo"); }
+};
+
+// ─── INICIO ───────────────────────────────────────────────
+$("go").onclick = load;
+applyPreset("24h");
+load();
+</script>
+</body>
+</html>
